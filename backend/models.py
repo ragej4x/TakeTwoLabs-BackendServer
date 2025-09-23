@@ -12,6 +12,7 @@ class User(SQLModel, table=True):
     last_name: Optional[str] = None
     phone: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    verified: bool = False
 
 
 class Entry(SQLModel, table=True):
@@ -25,6 +26,7 @@ class Entry(SQLModel, table=True):
     shoeCondition: str = ""
     shoeService: Optional[str] = None
     waiverSigned: bool = False
+    waiverUrl: Optional[str] = None
     beforePhotos: str = "[]"  # JSON string list
     assignedTo: Optional[str] = None
     needsReglue: Optional[bool] = None
