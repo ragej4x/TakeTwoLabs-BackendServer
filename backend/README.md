@@ -30,3 +30,18 @@ CORS is open to `http://localhost:3000` so Vite dev server can access it.
 - Data is stored in-memory and resets on server restart.
 - File uploads are not handled; `waiverPdf` is ignored on the backend.
 
+## Supabase configuration (DB + Storage)
+
+Set these environment variables before running:
+
+```bash
+set DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:PORT/DBNAME
+set SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+set SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+set SUPABASE_BUCKET=uploads
+```
+
+Then run migrations (tables are created automatically on startup for now). Point `DATABASE_URL` to your Supabase Postgres.
+
+
+!Fk9lratv007

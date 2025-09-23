@@ -1,16 +1,22 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request
+import os
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
 import uuid
 import json
+# Environment variables should be set in the shell before running
 
 from sqlmodel import select
-from .db import init_db, get_session
-from .models import Entry as EntryModel, User as UserModel
-from .auth import get_password_hash, verify_password, create_access_token, get_current_user_email
+from db import init_db, get_session
+from models import Entry as EntryModel, User as UserModel
+from auth import get_password_hash, verify_password, create_access_token, get_current_user_email
+import secrets
+import smtplib
+from email.mime.text import MIMEText
 from sqlmodel import Session
+from storage import get_supabase
 
 
 class ServiceDetails(BaseModel):
@@ -32,6 +38,7 @@ class EntryCreate(BaseModel):
     shoeCondition: str = ""
     shoeService: Optional[str] = None
     waiverSigned: bool = False
+    waiverUrl: Optional[str] = None
     beforePhotos: List[str] = Field(default_factory=list)
     assignedTo: Optional[str] = None
     needsReglue: Optional[bool] = None
@@ -53,6 +60,11 @@ class Entry(EntryCreate):
 
 app = FastAPI(title="TakeTwoLabs Backend", version="0.1.0")
 
+
+
+
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
@@ -61,6 +73,16 @@ app.add_middleware(
     ,
     allow_headers=["*"],
 )
+
+# Serve local uploaded files (if not using external storage)
+from starlette.staticfiles import StaticFiles
+from pathlib import Path
+UPLOADS_DIR = Path(__file__).with_name("uploads")
+try:
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
+app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 
 @app.on_event("startup")
@@ -88,6 +110,7 @@ def list_entries(current_user: str = Depends(get_current_user_email), session: S
             shoeCondition=r.shoeCondition,
             shoeService=r.shoeService,
             waiverSigned=r.waiverSigned,
+            waiverUrl=r.waiverUrl,
             beforePhotos=json.loads(r.beforePhotos or "[]"),
             assignedTo=r.assignedTo,
             needsReglue=r.needsReglue,
@@ -119,6 +142,7 @@ def create_entry(payload: EntryCreate, current_user: str = Depends(get_current_u
         shoeCondition=payload.shoeCondition,
         shoeService=payload.shoeService,
         waiverSigned=payload.waiverSigned,
+        waiverUrl=payload.waiverUrl,
         beforePhotos=json.dumps(payload.beforePhotos or []),
         assignedTo=payload.assignedTo,
         needsReglue=payload.needsReglue,
@@ -146,6 +170,7 @@ def create_entry(payload: EntryCreate, current_user: str = Depends(get_current_u
         shoeCondition=row.shoeCondition,
         shoeService=row.shoeService,
         waiverSigned=row.waiverSigned,
+        waiverUrl=row.waiverUrl,
         beforePhotos=json.loads(row.beforePhotos or "[]"),
         assignedTo=row.assignedTo,
         needsReglue=row.needsReglue,
@@ -171,6 +196,7 @@ class EntryUpdate(BaseModel):
     shoeCondition: Optional[str] = None
     shoeService: Optional[str] = None
     waiverSigned: Optional[bool] = None
+    waiverUrl: Optional[str] = None
     beforePhotos: Optional[List[str]] = None
     assignedTo: Optional[str] = None
     needsReglue: Optional[bool] = None
@@ -212,6 +238,7 @@ def update_entry(entry_id: str, updates: EntryUpdate, current_user: str = Depend
         shoeCondition=row.shoeCondition,
         shoeService=row.shoeService,
         waiverSigned=row.waiverSigned,
+        waiverUrl=row.waiverUrl,
         beforePhotos=json.loads(row.beforePhotos or "[]"),
         assignedTo=row.assignedTo,
         needsReglue=row.needsReglue,
@@ -238,6 +265,42 @@ def delete_entry(entry_id: str, current_user: str = Depends(get_current_user_ema
     return {"deleted": True}
 
 
+class UploadInitResponse(BaseModel):
+    url: str
+
+
+@app.post("/upload", response_model=dict)
+def upload_file(filename: str, current_user: str = Depends(get_current_user_email)) -> dict:
+    # Client will PUT directly to Supabase storage using the public bucket
+    # For simplicity, we will upload via server here synchronously
+    supabase = get_supabase()
+    bucket = os.environ.get("SUPABASE_BUCKET", "uploads")
+    # Expecting base64 in body would be heavy; keep it simple with presigned URL later.
+    # For MVP, just return bucket/path for client-side direct upload via supabase-js (optional).
+    return {"bucket": bucket, "path": f"{current_user}/{filename}"}
+
+
+# Upload waiver PDF to Supabase and return a public URL
+@app.post("/upload/waiver", response_model=dict)
+async def upload_waiver(request: Request, file: UploadFile = File(...), current_user: str = Depends(get_current_user_email)) -> dict:
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+    try:
+        ts = int(datetime.utcnow().timestamp())
+        safe_name = file.filename.replace("/", "_").replace("\\", "_")
+        relative_path = Path("waivers") / current_user / f"{ts}_{safe_name}"
+        dest_path = UPLOADS_DIR / relative_path
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        content = await file.read()
+        with open(dest_path, "wb") as f:
+            f.write(content)
+        base = str(request.base_url).rstrip("/")
+        public_url = f"{base}/uploads/{relative_path.as_posix()}"
+        return {"url": public_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+
+
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -256,22 +319,66 @@ class RegisterRequest(BaseModel):
     phone: Optional[str] = None
 
 
-@app.post("/auth/register", response_model=TokenResponse)
-def register(req: RegisterRequest, session: Session = Depends(get_session)) -> TokenResponse:
+@app.post("/auth/register", response_model=dict)
+def register(req: RegisterRequest, session: Session = Depends(get_session)) -> dict:
     exists = session.exec(select(UserModel).where(UserModel.email == req.email)).first()
     if exists:
         raise HTTPException(status_code=400, detail="Email already registered")
+    # create user as unverified
     user = UserModel(
         email=req.email,
         password_hash=get_password_hash(req.password),
         first_name=req.first_name,
         last_name=req.last_name,
         phone=req.phone,
+        verified=False,
     )
     session.add(user)
     session.commit()
-    token = create_access_token(subject=req.email)
-    return TokenResponse(access_token=token)
+    # create verification token
+    token = secrets.token_urlsafe(32)
+    # store token temporarily in user.phone field if empty (simple MVP); prefer a separate table in prod
+    user.phone = f"verify:{token}"
+    session.add(user)
+    session.commit()
+    # send email via Gmail SMTP
+    try:
+        app_password = os.environ.get("GMAIL_APP_PASSWORD", "gfzf hypn onya rokb")
+        sender = "jimboyaczon@taketwomanila.com"
+        recipient = "info@taketwomanila.com"  # Admin’s email
+
+        verify_link = f"http://127.0.0.1:8000/auth/verify?token={token}&email={req.email}"
+
+        body = f"""\
+        New User Registration Pending Verification – TakeTwoLabs
+
+        A new user has registered and is awaiting your confirmation.
+
+        User Details:
+        - Name: {req.first_name or ""} {req.last_name or ""}
+        - Email: {req.email}
+
+        To verify and activate this account, please click the link below:
+        {verify_link}
+
+        If this registration looks suspicious, you may safely ignore this request.
+
+        Thanks,
+        The TakeTwoLabs System
+        """
+
+
+        msg = MIMEText(body)
+        msg["Subject"] = "New User Registration Pending Verification – TakeTwoLabs"
+        msg["From"] = sender
+        msg["To"] = recipient
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(sender, app_password)
+            smtp.sendmail(sender, [recipient], msg.as_string())
+    except Exception as e:
+        # Do not expose internal error, but log/print server side
+        print("Email send failed:", e)
+    return {"message": "Registration successful. Please check your email to verify your account."}
 
 
 @app.post("/auth/login", response_model=TokenResponse)
@@ -279,8 +386,27 @@ def login(req: LoginRequest, session: Session = Depends(get_session)) -> TokenRe
     user = session.exec(select(UserModel).where(UserModel.email == req.email)).first()
     if not user or not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not user.verified:
+        raise HTTPException(status_code=403, detail="Account not verified. Please check your email.")
     token = create_access_token(subject=user.email)
     return TokenResponse(access_token=token)
+
+
+@app.get("/auth/verify")
+def verify_email(token: str, email: str, session: Session = Depends(get_session)):
+    user = session.exec(select(UserModel).where(UserModel.email == email)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    # simple check: token stored in phone as "verify:<token>"
+    expected = f"verify:{token}"
+    if user.phone != expected:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+    user.verified = True
+    # clear token storage placeholder
+    user.phone = None
+    session.add(user)
+    session.commit()
+    return {"verified": True}
 
 
 class MeResponse(BaseModel):

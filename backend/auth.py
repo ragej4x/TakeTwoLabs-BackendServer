@@ -6,7 +6,7 @@ from jose import jwt, JWTError
 from passlib.context import CryptContext
 
 
-SECRET_KEY = "changeme-dev-secret-key"
+SECRET_KEY = "fk9lratv"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 12
 
