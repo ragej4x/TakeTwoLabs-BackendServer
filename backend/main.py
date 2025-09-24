@@ -60,19 +60,16 @@ class Entry(EntryCreate):
 
 app = FastAPI(title="TakeTwoLabs Backend", version="0.1.0")
 
-
-
-
-
-
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "*"
+    ],
     allow_credentials=True,
     allow_methods=["*"]
     ,
-    allow_headers=["*"],
-)
+    allow_headers=["*"])
 
 # Serve local uploaded files (if not using external storage)
 from starlette.staticfiles import StaticFiles
@@ -283,21 +280,93 @@ def upload_file(filename: str, current_user: str = Depends(get_current_user_emai
 # Upload waiver PDF to Supabase and return a public URL
 @app.post("/upload/waiver", response_model=dict)
 async def upload_waiver(request: Request, file: UploadFile = File(...), current_user: str = Depends(get_current_user_email)) -> dict:
+    # Verify required environment variables
+    required_vars = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_BUCKET"]
+    missing_vars = [var for var in required_vars if not os.environ.get(var)]
+    if missing_vars:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Missing required environment variables: {', '.join(missing_vars)}"
+        )
+
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
     try:
+        print(f"Processing upload for user: {current_user}")
+        print(f"File name: {file.filename}")
         ts = int(datetime.utcnow().timestamp())
         safe_name = file.filename.replace("/", "_").replace("\\", "_")
-        relative_path = Path("waivers") / current_user / f"{ts}_{safe_name}"
-        dest_path = UPLOADS_DIR / relative_path
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path = f"waivers/{current_user}/{ts}_{safe_name}"
+        
+        # Read file content
         content = await file.read()
-        with open(dest_path, "wb") as f:
-            f.write(content)
-        base = str(request.base_url).rstrip("/")
-        public_url = f"{base}/uploads/{relative_path.as_posix()}"
-        return {"url": public_url}
+        
+        # Upload to Supabase storage
+        print("Initializing Supabase client...")
+        supabase = get_supabase()
+        bucket_name = "uploads"  # Use fixed bucket name
+        print(f"Using bucket: {bucket_name}")
+        
+        # Ensure bucket exists
+        try:
+            print("Checking/creating bucket...")
+            # Try to get bucket info first
+            try:
+                supabase.storage.get_bucket(bucket_name)
+                print(f"Bucket '{bucket_name}' already exists")
+            except Exception:
+                print(f"Bucket '{bucket_name}' not found, creating...")
+                supabase.storage.create_bucket(bucket_name, {"public": True})
+                print("Bucket created successfully")
+        except Exception as e:
+            print(f"Error with bucket operation: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Storage bucket error: {str(e)}"
+            )
+            
+        try:
+            # Upload the file
+            print(f"Uploading file to path: {file_path}")
+            print(f"Uploading file to '{file_path}'...")
+            # Remove any existing file
+            try:
+                supabase.storage.from_(bucket_name).remove([file_path])
+                print("Removed existing file if any")
+            except Exception:
+                pass  # Ignore if file doesn't exist
+                
+            # Upload new file
+            res = supabase.storage.from_(bucket_name).upload(
+                path=file_path,
+                file=content,
+                file_options={"content-type": "application/pdf"}
+            )
+            print("File uploaded successfully")
+            print("Upload successful")
+            
+            # Get the public URL
+            print("Getting public URL...")
+            # Generate signed URL that expires in 7 days
+            signed_url = supabase.storage\
+                .from_(bucket_name)\
+                .create_signed_url(file_path, 604800)  # 7 days in seconds
+            
+            if not signed_url or 'signedURL' not in signed_url:
+                raise HTTPException(status_code=500, detail="Failed to generate signed URL")
+                
+            print(f"Signed URL generated: {signed_url['signedURL']}")
+            return {"url": signed_url['signedURL']}
+        except Exception as upload_error:
+            print(f"Upload operation failed: {str(upload_error)}")
+            raise upload_error
+        
     except Exception as e:
+        import traceback
+        print(f"Upload failed. Error: {str(e)}")
+        print("Detailed traceback:")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
 
 
