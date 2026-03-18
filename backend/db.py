@@ -48,6 +48,9 @@ def init_db() -> None:
         with engine.begin() as conn:
             conn.execute(text('ALTER TABLE "entry" ADD COLUMN IF NOT EXISTS "waiverUrl" TEXT'))
             conn.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "verified" BOOLEAN DEFAULT FALSE'))
+            # Ensure soft-delete columns exist
+            conn.execute(text('ALTER TABLE "entry" ADD COLUMN IF NOT EXISTS "deleted" BOOLEAN DEFAULT FALSE'))
+            conn.execute(text('ALTER TABLE "entry" ADD COLUMN IF NOT EXISTS "deletedAt" TIMESTAMP NULL'))
     except Exception:
         # Safe to ignore if DB is not Postgres or lacks privileges
         pass
