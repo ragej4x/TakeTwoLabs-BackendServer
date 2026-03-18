@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request
+from fastapi.responses import HTMLResponse
 import os
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -69,10 +70,7 @@ origins = [
     "https://taketwomanila.com",
     "https://take-two-labs-data-entry-dashb-git-a70830-aczontongaos-projects.vercel.app",
     "https://take-two-labs-data-entry-dashboard-o42d20b3c.vercel.app",
-    "https://take-two-labs-data-entry-dashboard.vercel.app",
-    "https://backend.taketwomanila.com",
-    "https://dashboard.taketwomanila.com"
-    
+    "https://take-two-labs-data-entry-dashboard.vercel.app"
 ]
 
 app.add_middleware(
@@ -536,7 +534,7 @@ def register(req: RegisterRequest, session: Session = Depends(get_session)) -> d
             "davemanay1982@gmail.com",
         ]
 
-        backend_url = os.environ.get("BACKEND_URL", "https://taketwo-backend.vercel.app")
+        backend_url = os.environ.get("BACKEND_URL", "https://backend.taketwomanila.com")
         verify_link = f"{backend_url}/auth/verify?token={token}&email={req.email}"
 
         body = f"""\
@@ -615,21 +613,97 @@ def login(req: LoginRequest, session: Session = Depends(get_session)) -> TokenRe
     return TokenResponse(access_token=token)
 
 
-@app.get("/auth/verify")
+@app.get("/auth/verify", response_class=HTMLResponse)
 def verify_email(token: str, email: str, session: Session = Depends(get_session)):
     user = session.exec(select(UserModel).where(UserModel.email == email)).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
     # simple check: token stored in phone as "verify:<token>"
     expected = f"verify:{token}"
     if user.phone != expected:
         raise HTTPException(status_code=400, detail="Invalid or expired token")
+
     user.verified = True
     # clear token storage placeholder
     user.phone = None
     session.add(user)
     session.commit()
-    return {"verified": True}
+
+    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+
+    html = f"""
+    <!DOCTYPE html>
+    <html lang=\"en\">
+      <head>
+        <meta charset=\"utf-8\" />
+        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
+        <title>Account Verified</title>
+        <style>
+          body {{
+            margin: 0;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: #0b0f19;
+            color: #f5f7ff;
+          }}
+          .card {{
+            width: min(520px, 90vw);
+            padding: 28px 28px 32px;
+            border-radius: 18px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.12);
+            box-shadow: 0 18px 40px rgba(0,0,0,0.45);
+          }}
+          h1 {{
+            margin: 0 0 14px;
+            font-size: 1.75rem;
+            letter-spacing: 0.02em;
+          }}
+          p {{
+            margin: 0 0 22px;
+            line-height: 1.5;
+            color: rgba(245,247,255,0.78);
+          }}
+          a.button {{
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 18px;
+            border-radius: 999px;
+            text-decoration: none;
+            font-weight: 700;
+            background: #ffffff;
+            color: #0b0f19;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.35);
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+          }}
+          a.button:hover {{
+            transform: translateY(-1px);
+            box-shadow: 0 14px 24px rgba(0,0,0,0.42);
+          }}
+          .note {{
+            margin-top: 18px;
+            font-size: 0.9rem;
+            color: rgba(245,247,255,0.65);
+          }}
+        </style>
+      </head>
+      <body>
+        <div class=\"card\">
+          <h1>Account verified!</h1>
+          <p>Your email address has been successfully verified. You can now sign in to the TakeTwo Labs dashboard.</p>
+          <a class=\"button\" href=\"{frontend_url}\">Go to Dashboard</a>
+          <p class=\"note\">If you were not expecting this, you can safely close this page.</p>
+        </div>
+      </body>
+    </html>
+    """
+
+    return HTMLResponse(content=html, status_code=200)
 
 
 class MeResponse(BaseModel):
