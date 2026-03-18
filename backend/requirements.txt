@@ -6,7 +6,7 @@ python-jose==3.3.0
 passlib==1.7.4
 bcrypt==4.2.0
 supabase==2.7.4
-psycopg-binary
 python-dotenv==1.0.0
-psycopg2
+psycopg2-binary
 python-multipart
+requests
