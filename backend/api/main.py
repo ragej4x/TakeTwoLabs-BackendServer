@@ -630,7 +630,7 @@ def verify_email(token: str, email: str, session: Session = Depends(get_session)
     session.add(user)
     session.commit()
 
-    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+    frontend_url = os.environ.get("FRONTEND_URL", "https://dashboard.taketwomanila.com")
 
     html = f"""
     <!DOCTYPE html>
