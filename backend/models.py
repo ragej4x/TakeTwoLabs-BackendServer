@@ -38,6 +38,7 @@ class Entry(SQLModel, table=True):
     additionalBilling: Optional[float] = None
     deliveryOption: Optional[str] = None
     markedAs: Optional[str] = None
+    numberOfPairs: int = 1
     createdAt: datetime = Field(default_factory=datetime.utcnow)
     updatedAt: datetime = Field(default_factory=datetime.utcnow)
     deleted: bool = Field(default=False)
