@@ -40,5 +40,6 @@ class Entry(SQLModel, table=True):
     markedAs: Optional[str] = None
     createdAt: datetime = Field(default_factory=datetime.utcnow)
     updatedAt: datetime = Field(default_factory=datetime.utcnow)
-
+    deleted: bool = Field(default=False)
+    deletedAt: Optional[datetime] = None
 
