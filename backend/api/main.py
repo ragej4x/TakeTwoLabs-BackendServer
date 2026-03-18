@@ -70,8 +70,8 @@ origins = [
     "https://take-two-labs-data-entry-dashb-git-a70830-aczontongaos-projects.vercel.app",
     "https://take-two-labs-data-entry-dashboard-o42d20b3c.vercel.app",
     "https://take-two-labs-data-entry-dashboard.vercel.app",
-    "backend.taketwomanila.com",
-    "dashboard.taketwomanila.com"
+    "https://backend.taketwomanila.com",
+    "https://dashboard.taketwomanila.com"
     
 ]
 
