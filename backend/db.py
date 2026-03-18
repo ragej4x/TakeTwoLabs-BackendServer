@@ -51,6 +51,8 @@ def init_db() -> None:
             # Ensure soft-delete columns exist
             conn.execute(text('ALTER TABLE "entry" ADD COLUMN IF NOT EXISTS "deleted" BOOLEAN DEFAULT FALSE'))
             conn.execute(text('ALTER TABLE "entry" ADD COLUMN IF NOT EXISTS "deletedAt" TIMESTAMP NULL'))
+            # Ensure numberOfPairs column exists (default 1)
+            conn.execute(text('ALTER TABLE "entry" ADD COLUMN IF NOT EXISTS "numberOfPairs" INTEGER DEFAULT 1'))
     except Exception:
         # Safe to ignore if DB is not Postgres or lacks privileges
         pass
